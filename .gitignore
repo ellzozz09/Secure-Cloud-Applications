@@ -3,3 +3,21 @@
 *.tfstate.*
 *.tfplan
 crash.log
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Terraform local variables and plans
+*.tfvars
+!*.tfvars.example
+
+# Credentials and private keys
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
