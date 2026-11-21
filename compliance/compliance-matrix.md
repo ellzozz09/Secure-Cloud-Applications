@@ -14,7 +14,7 @@ The project uses five AWS-managed AWS Config rules to evaluate selected security
 | 1 | `DYNAMODB_TABLE_ENCRYPTION_ENABLED` | `AWS::DynamoDB::Table` | Whether DynamoDB tables have encryption enabled. | The table has encryption enabled. |
 | 2 | `DYNAMODB_PITR_ENABLED` | `AWS::DynamoDB::Table` | Whether DynamoDB tables have point-in-time recovery enabled. | Point-in-time recovery is enabled. |
 | 3 | `IAM_POLICY_NO_STATEMENTS_WITH_FULL_ACCESS` | `AWS::IAM::Policy` | Whether customer-managed IAM policies contain statements granting unrestricted service access. | No statement grants unrestricted service access. |
-| 4 | `VPC_SG_OPEN_ONLY_TO_AUTHORIZED_PORTS` | `AWS::EC2::SecurityGroup` | Whether publicly accessible security groups expose inbound ports outside the authorized TCP port list. | Public inbound access is restricted to the configured authorized port (`443`). |
+| 4 | `VPC_SG_OPEN_ONLY_TO_AUTHORIZED_PORTS` | `AWS::EC2::SecurityGroup` | Whether publicly accessible security groups expose inbound ports outside the authorized TCP port list. | No unrestricted public inbound access is allowed. |
 | 5 | `SQS_QUEUE_NO_PUBLIC_ACCESS` | `AWS::SQS::Queue` | Whether an SQS queue policy allows public access. | The queue policy does not grant public access. |
 
 ## 2. Rule Limitations and Interpretation
@@ -22,7 +22,7 @@ The project uses five AWS-managed AWS Config rules to evaluate selected security
 - **DynamoDB encryption:** This rule evaluates encryption status; it does not independently prove every aspect of key-management governance.
 - **DynamoDB PITR:** This rule checks point-in-time recovery, not the complete backup and disaster-recovery strategy.
 - **IAM full access:** This rule evaluates customer-managed IAM policies. It does not represent a complete audit of inline policies or AWS-managed policies.
-- **Security group ports:** This rule focuses on publicly accessible inbound ports. It does not verify all outbound rules or prove that every security-group configuration is secure.
+- **Security group ports:** This rule checks publicly accessible inbound ports. No public inbound ports are authorized for this project. It does not verify all outbound rules or prove that every security-group configuration is secure.
 - **SQS public access:** This rule checks public access through queue policies. It does not replace a complete IAM authorization review.
 
 A `COMPLIANT` result means the resource passed the specific rule's evaluation. It does not mean the entire resource or application is secure.

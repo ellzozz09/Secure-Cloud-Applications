@@ -43,8 +43,6 @@ Resources:
       Scope:
         ComplianceResourceTypes:
           - AWS::EC2::SecurityGroup
-      InputParameters:
-        authorizedTcpPorts: "443"
       Source:
         Owner: AWS
         SourceIdentifier: VPC_SG_OPEN_ONLY_TO_AUTHORIZED_PORTS
