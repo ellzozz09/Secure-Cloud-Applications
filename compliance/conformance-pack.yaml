@@ -1,0 +1,62 @@
+Resources:
+  DynamoDBEncryptionRule:
+    Type: AWS::Config::ConfigRule
+    Properties:
+      ConfigRuleName: depi-dev-dynamodb-encryption
+      Description: Checks whether DynamoDB tables have encryption enabled.
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::DynamoDB::Table
+      Source:
+        Owner: AWS
+        SourceIdentifier: DYNAMODB_TABLE_ENCRYPTION_ENABLED
+
+  DynamoDBPITRRule:
+    Type: AWS::Config::ConfigRule
+    Properties:
+      ConfigRuleName: depi-dev-dynamodb-pitr
+      Description: Checks whether DynamoDB tables have point-in-time recovery enabled.
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::DynamoDB::Table
+      Source:
+        Owner: AWS
+        SourceIdentifier: DYNAMODB_PITR_ENABLED
+
+  IAMFullAccessPolicyRule:
+    Type: AWS::Config::ConfigRule
+    Properties:
+      ConfigRuleName: depi-dev-iam-no-full-access
+      Description: Checks customer-managed IAM policies for unrestricted service permissions.
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::IAM::Policy
+      Source:
+        Owner: AWS
+        SourceIdentifier: IAM_POLICY_NO_STATEMENTS_WITH_FULL_ACCESS
+
+  SecurityGroupAuthorizedPortsRule:
+    Type: AWS::Config::ConfigRule
+    Properties:
+      ConfigRuleName: depi-dev-security-group-authorized-ports
+      Description: Checks publicly accessible security groups for unauthorized inbound ports.
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::EC2::SecurityGroup
+      InputParameters:
+        authorizedTcpPorts: "443"
+      Source:
+        Owner: AWS
+        SourceIdentifier: VPC_SG_OPEN_ONLY_TO_AUTHORIZED_PORTS
+
+  SQSNoPublicAccessRule:
+    Type: AWS::Config::ConfigRule
+    Properties:
+      ConfigRuleName: depi-dev-sqs-no-public-access
+      Description: Checks whether SQS queue policies allow public access.
+      Scope:
+        ComplianceResourceTypes:
+          - AWS::SQS::Queue
+      Source:
+        Owner: AWS
+        SourceIdentifier: SQS_QUEUE_NO_PUBLIC_ACCESS
