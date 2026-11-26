@@ -39,7 +39,7 @@ Resources:
     Type: AWS::Config::ConfigRule
     Properties:
       ConfigRuleName: depi-dev-security-group-authorized-ports
-      Description: Checks publicly accessible security groups for unauthorized inbound ports.
+      Description: Checks whether security groups allow unrestricted inbound access from public IPv4 or IPv6 sources.
       Scope:
         ComplianceResourceTypes:
           - AWS::EC2::SecurityGroup
