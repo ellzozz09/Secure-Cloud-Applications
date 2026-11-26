@@ -5,7 +5,8 @@ data "aws_caller_identity" "current" {}
 # ---------------------------------------------------------
 
 resource "aws_s3_bucket" "config" {
-  bucket = "depi-team-3-config-212810920501-us-east-1"
+  bucket        = "depi-team-3-config-212810920501-us-east-1"
+  force_destroy = true
 
   tags = {
     Name = "${var.project_name}-config-bucket"
