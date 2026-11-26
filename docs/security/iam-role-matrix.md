@@ -78,21 +78,24 @@ Resource-specific permissions will be scoped to actual AWS ARNs after the corres
 ### 3.4 ECS Worker Task Role
 
 **Allowed:**
-- SQS: `ReceiveMessage`, `DeleteMessage`, `ChangeMessageVisibility`.
-- DynamoDB: `GetItem`, `UpdateItem`.
-- AWS X-Ray write operations (planned; not yet attached in Terraform).
+- SQS: `GetQueueUrl`, `ReceiveMessage`, `DeleteMessage`.
+- DynamoDB: `UpdateItem`.
+- AWS X-Ray: `PutTraceSegments`, `PutTelemetryRecords`.
 
 **Resource scope:**
-- `depi-dev-tasks-queue`.
-- `depi-dev-tasks-table`.
+- `depi-dev-tasks-queue` for SQS operations.
+- `depi-dev-tasks-table` for DynamoDB operations.
+- X-Ray write permissions as required by the AWS service.
 
 **Prohibited:**
 - ECR pull permissions.
 - `secretsmanager:*`.
 - `dynamodb:DeleteItem`.
+- `dynamodb:GetItem`.
 - `dynamodb:PutItem`.
+- `sqs:ChangeMessageVisibility`.
 
-**Status:** Role implemented. Application permissions pending resource definitions.
+**Status:** Role implemented. Application permissions pending resource definitions and Terraform policy integration.
 
 ### 3.5 API Gateway Logging Role
 
@@ -123,7 +126,7 @@ Resource-specific permissions will be scoped to actual AWS ARNs after the corres
 | API Gateway logging role | Implemented |
 | Lambda DynamoDB/SQS permissions | Pending |
 | ECS execution ECR/Secrets permissions | Pending |
-| ECS worker SQS/DynamoDB permissions | Pending |
+| ECS worker SQS/DynamoDB/X-Ray permissions | Pending |
 | IAM Policy Simulator testing | Pending |
 
 ## 5. Security Principles
