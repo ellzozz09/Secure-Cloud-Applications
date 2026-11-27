@@ -38,22 +38,26 @@ a qualified assessor.
 | Web perimeter protection | GDPR Article 32; PCI DSS Requirements 1 and, where applicable, 6.4.2 | `terraform/waf.tf` and `docs/security/waf-validation-plan.md` are in the reviewed `main` snapshot. | **Documented in main; live verification pending.** Terraform configuration and a validation plan do not prove that WAF is deployed or that its rules have passed live tests. WAF alone does not establish secure coding or transmission encryption. |
 | Encryption and protection of stored data | GDPR Article 32; HIPAA §164.312(a)(2)(iv), where applicable; PCI DSS Requirements 3 and 4 only when in-scope account data is involved | `terraform/backend.tf` requests encryption for the Terraform S3 backend. M5 has a local Secrets Management Plan. | **Partial design evidence only.** The backend configuration does not prove that the state bucket exists or that its settings were verified. It is not evidence that application data, secrets, or network traffic are encrypted in a deployed environment. |
 | Application authentication and transmission security | GDPR Articles 25 and 32; HIPAA §164.312(a), (d), and (e); PCI DSS Requirements 4, 7, and 8, where applicable | An API Gateway architecture decision is in the reviewed `main` snapshot. | **Architecture evidence only.** A design decision does not prove that Cognito, API authorization, TLS settings, or application authentication have been implemented and tested. |
-| Vulnerability management and secure software changes | GDPR Article 32; HIPAA §164.308(a)(1)(ii)(A)-(B); PCI DSS Requirements 6 and 11, where applicable | M5's CI and deployment workflows and worker scan report are local drafts. A local scan of the M4 worker snapshot found no Bandit issues and no known dependency vulnerabilities at scan time. | **Local M5 draft/test.** Local Gitleaks scans of the current non-ignored working tree and Git history found no leaks, but GitHub Actions has not been run. DAST and ECR image scanning have not been verified. No `src/` tree or OpenAPI spec was present in the local snapshot, so DAST was not run. The worker tests initially had one failure; 11 passed only after a test-only mock was applied in a disposable copy, not to the M4 branch. |
-| Configuration monitoring and audit evidence | GDPR Article 32; HIPAA §164.312(b); PCI DSS Requirement 10, where applicable | M1's AWS Config Terraform and AWS Config control inventory are in PR #7. That PR's matrix states that the recorder, conformance pack, and live evaluations are pending deployment. | **PR-only; live verification pending.** PR #7 was open in the status check used for this crosswalk. AWS Config rule evaluations are not a substitute for audit-event logging or a complete security review. No live `COMPLIANT` result is claimed. |
+| Vulnerability management and secure software changes | GDPR Article 32; HIPAA §164.308(a)(1)(ii)(A)-(B); PCI DSS Requirements 6 and 11, where applicable | The M5 CI workflow is in PR #9. This branch moves the deployment draft outside `.github/workflows/` and adds a default-disabled deployment-role draft. The worker scan report covers a specific M4 snapshot. | **PR and local evidence only.** GitHub Actions checks were triggered for the initial PR revision. Check the latest PR commit's results after these corrections are pushed before claiming a pass. Local Gitleaks scans found no leaks. DAST and ECR image scanning were not verified; the inspected M5 workspace had no `src/api` or OpenAPI specification, so DAST was not run. Worker tests passed 11/11 only with a test-only mock in a disposable copy, not on the M4 branch. |
+| Configuration monitoring and audit evidence | GDPR Article 32; HIPAA §164.312(b); PCI DSS Requirement 10, where applicable | M1's AWS Config Terraform, conformance-pack template, and control inventory were merged into main by PR #7. The merged matrix reports local validation and a Terraform plan, but no resources were applied; the recorder, conformance pack, and live evaluations remain pending. | **Definitions are in main; live deployment and evaluation are pending.** PR #7 is merged, but no live AWS Config evaluation is evidenced. AWS Config rule evaluations are not a substitute for audit-event logging or a complete security review. No live `COMPLIANT` result is claimed. |
 | Backup, recovery, and integrity | GDPR Article 32; HIPAA §164.308(a)(7) and §164.312(c)(1), where applicable | No live backup, restore, or recovery-test evidence was reviewed for this crosswalk. | **Not evidenced.** Terraform configuration or a planned backup rule alone would not demonstrate that recovery works; a restore test and retained evidence are needed. |
 | Secrets lifecycle and incident response | GDPR Articles 32, 33, and 34; HIPAA §164.308(a)(6); PCI DSS Requirement 12.10, where applicable | M5's Secrets Management Plan is a local draft. No completed secret-rotation or incident-response test was reviewed. | **Local M5 draft / not operationally verified.** The plan does not prove that Secrets Manager, rotation, audit monitoring, or incident procedures have been deployed and tested. |
 
 ## Related project artifacts
 
-M1's `compliance/compliance-matrix.md` in PR #7 inventories selected AWS
-Config rules. That artifact is distinct from this framework crosswalk and is
-not replaced by it. Its status and live-evaluation limitations should be
-rechecked before final reporting.
+M1's `compliance/compliance-matrix.md` and `compliance/conformance-pack.yaml`
+were merged into `main` by PR #7. Those artifacts inventory selected AWS Config
+rules and are distinct from this framework crosswalk. Their existence does not
+establish deployment or live evaluations; recheck current AWS evidence before
+final reporting.
 
 M5's current local drafts are:
 
 - `.github/workflows/ci-security.yml`
-- `.github/workflows/deploy-apps.yml` (manual draft; not executed)
+- `docs/security/deferred-workflows/deploy-apps.yml.disabled` (inert
+  reference outside `.github/workflows/`; not executed)
+- `terraform/github_deploy_role.tf` (optional role draft; disabled by default,
+  locally validated only, not applied)
 - `.github/pull_request_template.md`
 - `docs/architecture/cicd-pipeline.md`
 - `docs/security/secrets-management-plan.md`

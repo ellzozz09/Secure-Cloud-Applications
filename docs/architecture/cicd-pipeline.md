@@ -65,31 +65,40 @@ OIDC tokens, or run AWS deployment commands.
 approved least-privilege OIDC role and the required Terraform state and locking
 permissions for pull-request runs. CI must never run `terraform apply`.
 
+## Third-party GitHub Actions pinning
+
+Actions in the active CI workflow and the inert deployment reference are pinned
+to full commit SHAs, with release versions in comments. Update pins through a
+reviewed PR: confirm each SHA resolves to the intended release in the official
+upstream repository, review the release notes and changes, update the SHA and
+version comment together, and rerun checks. Do not use floating version tags.
+The deployment reference under `docs/` is not loaded or executed by GitHub
+Actions.
+
 ## Deployment and security checks not covered by this workflow
 
 The following are separate M5 deliverables and are not implemented by
 `ci-security.yml`:
 
-- `.github/workflows/deploy-apps.yml` is a manual, fail-closed deployment
-  draft. It runs only from `main` after an explicit `DEPLOY` confirmation.
-  It builds the Lambda ZIP and SHA-256 file, pushes the worker image, requires
-  ECR scan-on-push, rejects High/Critical findings, signs and verifies the
-  image with keyless Cosign, updates Lambda and ECS, and uploads provenance
-  artifacts. It has not been executed. It requires the repository variables
-  `AWS_DEPLOY_ROLE_ARN`, `ECR_REPOSITORY`, `LAMBDA_FUNCTION_NAME`,
-  `ECS_CLUSTER_NAME`, `ECS_SERVICE_NAME`, and `ECS_CONTAINER_NAME`, along with
-  the application and AWS resources. Running it changes resources in
-  `us-east-1` and may incur cost; do not dispatch it until the role permissions,
-  AWS impact, and cost have been reviewed.
+- **No deployment workflow is active.** The previous draft is preserved at
+  `docs/security/deferred-workflows/deploy-apps.yml.disabled`, outside
+  `.github/workflows/`, so GitHub Actions will not load it. A separate
+  `terraform/github_deploy_role.tf` draft defines an optional role with
+  `enable_github_app_deploy_role = false` by default; it has passed local
+  validation only and has not been applied. The draft role has no Terraform
+  state permissions and is intended to be restricted to exact ECR, Lambda, ECS,
+  and ECS task-role ARNs.
+- Before any future deployment, the role and policy require security review.
+  The GitHub OIDC trust expects the protected `m5-deploy` Environment, so that
+  Environment must require an authorized reviewer and restrict deployments to
+  `main`; the workflow job must declare `environment: m5-deploy`. Do not enable
+  the role or run deployment until the prerequisites, permissions, AWS impact,
+  and cost are reviewed.
+- The deployment reference uses the planned `src/worker/Dockerfile` path with
+  repository-root build context. The M4 snapshot inspected at commit `64c320f`
+  instead has a root-level Dockerfile; confirm the final integrated path before
+  restoring any deployment workflow.
 
-  In this local snapshot, `src/api` and `src/worker/requirements.txt` are
-  absent, so the deployment source preflight cannot pass. The Terraform
-  OIDC trust is restricted to this repository's `main` branch, but not to
-  `deploy-apps.yml`. The `github_oidc` role has a Terraform state/lock
-  policy attached; no separate deployment role or ECR/Lambda/ECS deployment
-  permissions were found in the reviewed Terraform files.
-  `AWS_DEPLOY_ROLE_ARN` is a GitHub variable; its name alone does not
-  establish that a suitable deployment role exists.
 - **Not present or run in this local snapshot:** no DAST workflow or scan
   evidence exists. The workspace has no `src/` tree or OpenAPI spec, and no
   deployed test API or test-auth configuration was verified. Authenticated
