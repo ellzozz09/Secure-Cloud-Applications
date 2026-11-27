@@ -1,0 +1,379 @@
+# INERT reference only: outside .github/workflows; GitHub Actions will not load it.
+# The project plan expects src/worker/Dockerfile, but reviewed M4 commit
+# 64c320f has a repository-root Dockerfile. Confirm the integrated path
+# before reactivation. Keep the root build context for root-relative COPY paths.
+
+name: Deploy Lambda and ECS worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Select DEPLOY only after reviewing the AWS impact and cost."
+        required: true
+        type: choice
+        options:
+          - NO
+          - DEPLOY
+        default: NO
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-apps-main
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build, scan, sign, and deploy
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      inputs.confirmation == 'DEPLOY'
+    runs-on: ubuntu-latest
+    environment: m5-deploy
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: us-east-1
+      AWS_DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+      ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+      LAMBDA_FUNCTION_NAME: ${{ vars.LAMBDA_FUNCTION_NAME }}
+      ECS_CLUSTER_NAME: ${{ vars.ECS_CLUSTER_NAME }}
+      ECS_SERVICE_NAME: ${{ vars.ECS_SERVICE_NAME }}
+      ECS_CONTAINER_NAME: ${{ vars.ECS_CONTAINER_NAME }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Validate deployment prerequisites before AWS authentication
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          [[ -n "$AWS_DEPLOY_ROLE_ARN" ]] || {
+            echo "::error::Configure the AWS_DEPLOY_ROLE_ARN repository variable."
+            exit 1
+          }
+          [[ -n "$ECR_REPOSITORY" ]] || {
+            echo "::error::Configure the ECR_REPOSITORY repository variable."
+            exit 1
+          }
+          [[ -n "$LAMBDA_FUNCTION_NAME" ]] || {
+            echo "::error::Configure the LAMBDA_FUNCTION_NAME repository variable."
+            exit 1
+          }
+          [[ -n "$ECS_CLUSTER_NAME" ]] || {
+            echo "::error::Configure the ECS_CLUSTER_NAME repository variable."
+            exit 1
+          }
+          [[ -n "$ECS_SERVICE_NAME" ]] || {
+            echo "::error::Configure the ECS_SERVICE_NAME repository variable."
+            exit 1
+          }
+          [[ -n "$ECS_CONTAINER_NAME" ]] || {
+            echo "::error::Configure the ECS_CONTAINER_NAME repository variable."
+            exit 1
+          }
+
+          for required_path in \
+            src/api \
+            src/worker/Dockerfile \
+            .dockerignore \
+            src/worker/requirements.txt
+          do
+            if [[ ! -e "$required_path" ]]; then
+              echo "::error::Required deployment input is absent: $required_path"
+              exit 1
+            fi
+          done
+
+          if ! find src/api -type f -name '*.py' -print -quit | grep -q .; then
+            echo "::error::No Python Lambda source files were found under src/api."
+            exit 1
+          fi
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Package Lambda and record SHA-256
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          package_dir="$RUNNER_TEMP/lambda-package"
+          mkdir -p "$package_dir"
+
+          if [[ -f src/api/requirements.txt ]]; then
+            python -m pip install \
+              --disable-pip-version-check \
+              --requirement src/api/requirements.txt \
+              --target "$package_dir" \
+              --no-compile
+          fi
+
+          tar \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='.env' \
+            --exclude='.env.*' \
+            -C src/api \
+            -cf - . |
+            tar -C "$package_dir" -xf -
+
+          (
+            cd "$package_dir"
+            zip -qr "$RUNNER_TEMP/lambda.zip" .
+          )
+
+          (
+            cd "$RUNNER_TEMP"
+            sha256sum lambda.zip > lambda.zip.sha256
+          )
+
+          sha256="$(cut -d ' ' -f1 "$RUNNER_TEMP/lambda.zip.sha256")"
+          printf 'sha256=%s\n' "$sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Configure AWS credentials with GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+          role-session-name: m5-deploy-${{ github.run_id }}
+
+      - name: Verify ECR scan-on-push and log in
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          scan_on_push="$(
+            aws ecr describe-repositories \
+              --repository-names "$ECR_REPOSITORY" \
+              --query 'repositories[0].imageScanningConfiguration.scanOnPush' \
+              --output text
+          )"
+
+          if [[ "${scan_on_push,,}" != "true" ]]; then
+            echo "::error::ECR scan-on-push must be enabled for the repository."
+            exit 1
+          fi
+
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          registry="${account_id}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+          aws ecr get-login-password --region "$AWS_REGION" |
+            docker login --username AWS --password-stdin "$registry"
+
+          printf 'ECR_REGISTRY=%s\n' "$registry" >> "$GITHUB_ENV"
+
+      - name: Build and push worker image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          image_tag="${ECR_REGISTRY}/${ECR_REPOSITORY}:${GITHUB_SHA}"
+
+          docker buildx build \
+            --platform linux/amd64 \
+            --file src/worker/Dockerfile \
+            --tag "$image_tag" \
+            --push \
+            --metadata-file "$RUNNER_TEMP/build-metadata.json" \
+            .
+
+          digest="$(jq -er '."containerimage.digest"' "$RUNNER_TEMP/build-metadata.json")"
+          if [[ ! "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "::error::Docker Buildx returned an invalid image digest."
+            exit 1
+          fi
+
+          image_digest_ref="${ECR_REGISTRY}/${ECR_REPOSITORY}@${digest}"
+          printf '%s\n' "$image_digest_ref" > "$RUNNER_TEMP/image-digest.txt"
+          printf 'IMAGE_DIGEST=%s\n' "$digest" >> "$GITHUB_ENV"
+          printf 'IMAGE_DIGEST_REF=%s\n' "$image_digest_ref" >> "$GITHUB_ENV"
+
+      - name: Wait for ECR image scan and reject High or Critical findings
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          scan_json=""
+          scan_status=""
+          scan_error="$RUNNER_TEMP/ecr-scan-error.txt"
+
+          for attempt in {1..30}; do
+            if scan_json="$(
+              aws ecr describe-image-scan-findings \
+                --repository-name "$ECR_REPOSITORY" \
+                --image-id "imageDigest=$IMAGE_DIGEST" \
+                --output json \
+                2>"$scan_error"
+            )"; then
+              scan_status="$(jq -r '.imageScanStatus.status // empty' <<< "$scan_json")"
+
+              case "$scan_status" in
+                COMPLETE)
+                  break
+                  ;;
+                FAILED|UNSUPPORTED_IMAGE)
+                  echo "::error::ECR image scan ended with status $scan_status."
+                  exit 1
+                  ;;
+              esac
+            else
+              if ! grep -Eq 'ScanNotFoundException|ImageNotFoundException' "$scan_error"; then
+                echo "::error::Could not retrieve ECR scan status; check role permissions."
+                exit 1
+              fi
+            fi
+
+            sleep 10
+          done
+
+          if [[ "$scan_status" != "COMPLETE" ]]; then
+            echo "::error::ECR image scan did not complete within five minutes."
+            exit 1
+          fi
+
+          critical="$(
+            jq -r '.imageScanFindings.findingSeverityCounts.CRITICAL // 0' \
+              <<< "$scan_json"
+          )"
+          high="$(
+            jq -r '.imageScanFindings.findingSeverityCounts.HIGH // 0' \
+              <<< "$scan_json"
+          )"
+
+          if [[ ! "$critical" =~ ^[0-9]+$ || ! "$high" =~ ^[0-9]+$ ]]; then
+            echo "::error::ECR returned invalid vulnerability counts."
+            exit 1
+          fi
+
+          if (( critical > 0 || high > 0 )); then
+            echo "::error::ECR found $critical Critical and $high High vulnerabilities."
+            exit 1
+          fi
+
+          echo "ECR scan completed with no High or Critical findings."
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+
+      - name: Sign and verify image with keyless Cosign
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cosign sign --yes "$IMAGE_DIGEST_REF"
+
+          cosign verify \
+            --certificate-identity \
+              "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/deploy-apps.yml@refs/heads/main" \
+            --certificate-oidc-issuer \
+              "https://token.actions.githubusercontent.com" \
+            "$IMAGE_DIGEST_REF" \
+            > "$RUNNER_TEMP/cosign-verification.json"
+
+      - name: Update Lambda function code
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          aws lambda update-function-code \
+            --function-name "$LAMBDA_FUNCTION_NAME" \
+            --zip-file "fileb://$RUNNER_TEMP/lambda.zip" \
+            --no-cli-pager \
+            > /dev/null
+
+          aws lambda wait function-updated \
+            --function-name "$LAMBDA_FUNCTION_NAME"
+
+      - name: Update ECS service to the signed image digest
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          task_definition_arn="$(
+            aws ecs describe-services \
+              --cluster "$ECS_CLUSTER_NAME" \
+              --services "$ECS_SERVICE_NAME" \
+              --query 'services[0].taskDefinition' \
+              --output text
+          )"
+
+          if [[ -z "$task_definition_arn" || "$task_definition_arn" == "None" ]]; then
+            echo "::error::Could not find the ECS service task definition."
+            exit 1
+          fi
+
+          aws ecs describe-task-definition \
+            --task-definition "$task_definition_arn" \
+            --query taskDefinition \
+            --output json \
+            > "$RUNNER_TEMP/task-definition-current.json"
+
+          jq \
+            --arg name "$ECS_CONTAINER_NAME" \
+            --arg image "$IMAGE_DIGEST_REF" \
+            '
+              if ([.containerDefinitions[] | select(.name == $name)] | length) != 1
+              then error("Configured container name must match exactly one container")
+              else
+                .containerDefinitions |=
+                  map(if .name == $name then .image = $image else . end)
+                | del(
+                    .taskDefinitionArn,
+                    .revision,
+                    .status,
+                    .requiresAttributes,
+                    .compatibilities,
+                    .registeredAt,
+                    .registeredBy
+                  )
+              end
+            ' \
+            "$RUNNER_TEMP/task-definition-current.json" \
+            > "$RUNNER_TEMP/task-definition-new.json"
+
+          new_task_definition_arn="$(
+            aws ecs register-task-definition \
+              --cli-input-json "file://$RUNNER_TEMP/task-definition-new.json" \
+              --query 'taskDefinition.taskDefinitionArn' \
+              --output text \
+              --no-cli-pager
+          )"
+
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --service "$ECS_SERVICE_NAME" \
+            --task-definition "$new_task_definition_arn" \
+            --no-cli-pager \
+            > /dev/null
+
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER_NAME" \
+            --services "$ECS_SERVICE_NAME"
+
+      - name: Upload Lambda package and deployment provenance
+        if: ${{ always() && steps.package.outputs.sha256 != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: deployment-provenance-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/lambda.zip
+            ${{ runner.temp }}/lambda.zip.sha256
+            ${{ runner.temp }}/image-digest.txt
+          if-no-files-found: ignore
+          retention-days: 7
