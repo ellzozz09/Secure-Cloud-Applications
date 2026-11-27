@@ -29,7 +29,7 @@ class Worker:
         self.sqs = boto3.client("sqs", region_name=self.region)
         self.dynamodb = boto3.resource("dynamodb", region_name=self.region)
         self.table = self.dynamodb.Table(self.table_name)
-        
+
     def validate_task(self, task):
         if not isinstance(task, dict):
             raise ValueError("Task must be a JSON object")
@@ -127,33 +127,36 @@ class Worker:
         receive_count = self.get_receive_count(message)
         task = None
 
-        with xray_recorder.in_subsegment("process_sqs_message") as subsegment:
-            try:
-                task = self.parse_message(message)
+        with xray_recorder.in_segment("process_sqs_message"):
+            with xray_recorder.in_subsegment("message_processing") as subsegment:
+                try:
+                    task = self.parse_message(message)
 
-                subsegment.put_annotation("task_id", task["task_id"])
-                subsegment.put_annotation("receive_count", receive_count)
+                    subsegment.put_annotation("task_id", task["task_id"])
+                    subsegment.put_annotation("receive_count", receive_count)
 
-                self.start_task(task["task_id"])
-                self.process_task(task)
-                self.complete_task(task["task_id"])
+                    self.start_task(task["task_id"])
+                    self.process_task(task)
+                    self.complete_task(task["task_id"])
 
-                self.delete_message(message)
-            except Exception as error:
-                subsegment.put_annotation("error", True)
+                    self.delete_message(message)
 
-                if task is not None and receive_count >= 3:
-                    try:
-                        self.fail_task(task["task_id"], error)
-                    except Exception as status_error:
-                        logger.error(
-                          f"Could not update task status: {status_error}"
-                        )
+                except Exception as error:
+                    subsegment.put_annotation("error", True)
 
-                logger.error(
-                   f"Message processing failed. Attempt {receive_count}/3: {error}"
-                )
-                raise
+                    if task is not None and receive_count >= 3:
+                        try:
+                            self.fail_task(task["task_id"], error)
+                        except Exception as status_error:
+                            logger.error(
+                                f"Could not update task status: {status_error}"
+                            )
+
+                    logger.error(
+                        f"Message processing failed. Attempt {receive_count}/3: {error}"
+                    )
+                    raise
+
     def run(self):
         logger.info("Worker started")
 

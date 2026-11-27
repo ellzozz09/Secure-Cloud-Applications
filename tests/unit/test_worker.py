@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch, MagicMock
 
-from src.worker.worker import Worker, xray_recorder
+from src.worker.worker import Worker
 
 class TestWorker(unittest.TestCase):
 
@@ -9,10 +9,6 @@ class TestWorker(unittest.TestCase):
     @patch("src.worker.worker.boto3.client")
     def setUp(self, mock_client, mock_resource):
         self.worker = Worker()
-        xray_recorder.begin_segment("unit-test")
-
-    def tearDown(self):
-        xray_recorder.end_segment()
 
     def test_validate_task_success(self):
         task = {"task_id": "123"}
@@ -43,7 +39,7 @@ class TestWorker(unittest.TestCase):
         result = self.worker.get_receive_count(message)
 
         self.assertEqual(result, 2)
-        
+
     def test_invalid_json_message_not_deleted(self):
         message = {
             "Attributes": {
@@ -148,6 +144,39 @@ class TestWorker(unittest.TestCase):
 
         self.worker.fail_task.assert_called_once()
         self.worker.delete_message.assert_not_called()
+
+    @patch("src.worker.worker.xray_recorder.in_subsegment")
+    @patch("src.worker.worker.xray_recorder.in_segment")
+    def test_process_message_creates_segment(
+        self, mock_segment, mock_subsegment
+    ):
+        mock_segment.return_value.__enter__ = MagicMock()
+        mock_segment.return_value.__exit__ = MagicMock(return_value=False)
+
+        mock_subsegment.return_value.__enter__ = MagicMock()
+        mock_subsegment.return_value.__exit__ = MagicMock(return_value=False)
+
+        message = {
+            "Attributes": {
+                "ApproximateReceiveCount": "1"
+            },
+            "Body": '{"task_id": "123"}'
+        }
+
+        self.worker.parse_message = MagicMock(
+            return_value={"task_id": "123"}
+        )
+        self.worker.process_task = MagicMock()
+        self.worker.start_task = MagicMock()
+        self.worker.complete_task = MagicMock()
+        self.worker.delete_message = MagicMock()
+
+        self.worker.process_message(message)
+
+        mock_segment.assert_called_once_with("process_sqs_message")
+        mock_subsegment.assert_called_once_with("message_processing")
+        mock_segment.return_value.__exit__.assert_called_once()
+        mock_subsegment.return_value.__exit__.assert_called_once()
 
 if __name__ == "__main__":
     unittest.main()
