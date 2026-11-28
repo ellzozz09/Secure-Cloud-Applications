@@ -1,0 +1,23 @@
+
+# Git files
+.git/
+.gitignore
+
+# Python virtual environment
+.venv/
+venv/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Project files not needed in the worker image
+tests/
+terraform/
+docs/
+.github/
+
+# Local environment files
+.env
+.env.*
